@@ -1,8 +1,7 @@
 name: Parser Runner
 
 on:
-  schedule:
-    - cron: "*/5 * * * *"   # каждые 5 минут
+ 
   workflow_dispatch:        # ручной запуск
 
 jobs:
