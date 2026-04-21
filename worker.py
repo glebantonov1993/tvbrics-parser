@@ -5,6 +5,7 @@ import gspread
 import os
 import json
 from datetime import datetime
+import re
 from google.oauth2.service_account import Credentials
 
 # =========================
@@ -39,8 +40,8 @@ partners = {
     "cgtn.com": "CGTN",
     "news9live.com": "News9",
     "alalam.ir": "Alalam News Network",
-    "inform.kz ": "Kazinform ",
-    "aninews.in": "ANI ",
+    "inform.kz": "Kazinform",
+    "aninews.in": "ANI",
     "elbalad.news": "Sada El-Balad",
     "vnanet.vn": "Vietnam News Agency (VNA)",
     "news.cgtn.com": "CGTN",
@@ -50,7 +51,6 @@ partners = {
     "nournews.ir": "Nour News",
     "akchabar.kg": "Акчабар",
     "tvri.go.id": "TVRI",
-    "thediplomaticsociety.co.za": "The Diplomatic Society",
     "boliviatv.bo": "BOLIVIA TV",
     "brasildefato.com.br": "Brasil de Fato",
     "thaipbs.or.th": "Thai PBS",
@@ -66,42 +66,22 @@ partners = {
     "herald.co.zw": "The Herald",
     "mena.org.eg": "MENA",
     "belta.by": "БелТА",
-    "inform.kz": "МИА Казинформ",
     "wam.ae": "WAM",
-    "elciudadano.com": "El Ciudadano",
-    "cronicadigital.cl": "Crónica Digital",
     "irna.ir": "IRNA",
     "mehrnews.com": "Mehr Media Group",
-    "tap.info.tn": "Tunis Afrique Presse",
-    "dailynewsegypt.com": "Daily News Egypt",
-    "bricslat.com": "BRICSLat",
-    "china.com": "China.com",
-    "atnews.co.za": "African Times",
     "telesurtv.net": "teleSUR",
     "dknews.kz": "Деловой Казахстан",
     "info-rm.com": "Мордовия 24",
-    "dbw.cn": "Дунбэйван",
-    "ahorasanjuan.com": "Ahora San Juan",
-    "prensa-latina.cu": "Prensa Latina",
-    "brasil247.com": "Brasil 247",
-    "zbc.co.zw": "Zimbabwe Broadcasting Corporation",
-    "ians.in": "IANS",
-    "todapalavra.info": "Toda Palavra",
     "chinadaily.com.cn": "China Daily",
     "iol.co.za": "Pretoria News",
-    "itmexpo.ru": "Интурмаркет",
     "durbantv.net": "Durban TV",
-    "trinitymirror.net": "Trinity Mirror",
     "metropoles.com": "Metropoles",
     "people.com.cn": "Жэньминь жибао",
-    "news.cn": "СИНЬХУА Новости",
-    "tvcultura.com.br": "TV CULTURA",
-    "africannewsagency.com": "ANA"
+    "news.cn": "СИНЬХУА Новости"
 }
 
-
 # =========================
-# LANGUAGE DETECTION
+# LANGUAGE
 # =========================
 LANG_MAP = {
     "tvbrics.com/en/": "en",
@@ -119,27 +99,41 @@ def get_language(url):
     return "ru"
 
 # =========================
-# MONTH PARSER
+# DATE PARSER (FIXED)
 # =========================
-def parse_month(date_str):
+def parse_normalized_date(date_str):
     if not date_str:
         return ""
 
-    import re
-
-    # Китай / араб / любые с 年月
-    m = re.search(r"(\d{2,4})年(\d{1,2})月", date_str)
+    # CN / AR format: 2026年04月21日
+    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", date_str)
     if m:
-        return int(m.group(2))
+        y, mo, d = map(int, m.groups())
+        return f"{y:04d}-{mo:02d}-{d:02d}"
 
-    # Обычный формат 27.03.26
+    # EU format: 27.03.26
     try:
         dt = datetime.strptime(date_str, "%d.%m.%y")
-        return dt.month
+        return dt.strftime("%Y-%m-%d")
+    except:
+        pass
+
+    # fallback ISO
+    try:
+        dt = datetime.fromisoformat(date_str)
+        return dt.strftime("%Y-%m-%d")
     except:
         pass
 
     return ""
+
+def parse_month(norm_date):
+    if not norm_date:
+        return ""
+    try:
+        return int(norm_date.split("-")[1])
+    except:
+        return ""
 
 # =========================
 # PARTNER MATCH
@@ -170,7 +164,6 @@ def parse(url):
 
     links = []
     partners_list = []
-
     seen = set()
 
     for a in soup.find_all("a", href=True):
@@ -196,18 +189,15 @@ def parse(url):
 # =========================
 # MAIN
 # =========================
-# =========================
-# MAIN
-# =========================
 rows = worksheet.get_all_values()
 
 MAX_LINKS = 10
-TOTAL_COLS = 29  # A–AC
+TOTAL_COLS = 29
 
 for i, row in enumerate(rows[1:], start=2):
 
     url = row[1]
-    status = row[26] if len(row) > 26 else ""  # AA
+    status = row[26] if len(row) > 26 else ""
 
     if not url or status == "DONE":
         continue
@@ -216,43 +206,27 @@ for i, row in enumerate(rows[1:], start=2):
 
     date, title, links, partners_found = parse(url)
 
+    norm_date = parse_normalized_date(date)
+    month = parse_month(norm_date)
     language = get_language(url)
-    month = parse_month(date)
 
-    # =========================
-    # 🧠 BUILD ROW (СТРОГО 29 КОЛОНОК)
-    # =========================
     row_data = [""] * TOTAL_COLS
 
-    # базовые
-    row_data[0] = ""          # A timestamp
-    row_data[1] = url         # B
-    row_data[2] = date        # C
-    row_data[3] = title       # D
+    row_data[1] = url
+    row_data[2] = norm_date
+    row_data[3] = title
 
-    # ссылки + партнёры (E–X)
     for idx in range(MAX_LINKS):
         link = links[idx] if idx < len(links) else ""
         partner = partners_found[idx] if idx < len(partners_found) else ""
 
-        col_link = 4 + idx * 2       # E=4
-        col_partner = 5 + idx * 2    # F=5
+        row_data[4 + idx * 2] = link
+        row_data[5 + idx * 2] = partner
 
-        row_data[col_link] = link
-        row_data[col_partner] = partner
-
-    # AA статус
     row_data[26] = "DONE"
-
-    # AB язык
     row_data[27] = language
-
-    # AC месяц
     row_data[28] = month
 
-    # =========================
-    # ⚡ ОДНА ЗАПИСЬ
-    # =========================
     worksheet.update(
         range_name=f"A{i}:AC{i}",
         values=[row_data]
