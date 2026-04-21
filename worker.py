@@ -125,20 +125,17 @@ def parse_month(date_str):
     if not date_str:
         return ""
 
-    try:
-        # 27.03.26
-        if "." in date_str:
-            dt = datetime.strptime(date_str, "%d.%m.%y")
-            return dt.month
-    except:
-        pass
+    import re
 
+    # Китай / араб / любые с 年月
+    m = re.search(r"(\d{2,4})年(\d{1,2})月", date_str)
+    if m:
+        return int(m.group(2))
+
+    # Обычный формат 27.03.26
     try:
-        # 26年04月21日
-        import re
-        m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", date_str)
-        if m:
-            return int(m.group(2))
+        dt = datetime.strptime(date_str, "%d.%m.%y")
+        return dt.month
     except:
         pass
 
