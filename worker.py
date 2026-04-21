@@ -155,6 +155,17 @@ for i, row in enumerate(rows[1:], start=2):
 
     worksheet.update_cell(i, 3, date)
     worksheet.update_cell(i, 4, title)
-    worksheet.update_cell(i, 5, "\n".join(links))
-    worksheet.update_cell(i, 6, "\n".join(partners_found))
+
+    MAX_LINKS = 10
+
+    for idx in range(MAX_LINKS):
+        link = links[idx] if idx < len(links) else ""
+        partner = partners_found[idx] if idx < len(partners_found) else ""
+
+        col_link = 5 + idx * 2      # E, G, I...
+        col_partner = 6 + idx * 2   # F, H, J...
+
+        worksheet.update_cell(i, col_link, link)
+        worksheet.update_cell(i, col_partner, partner)
+
     worksheet.update_cell(i, 7, "DONE")
