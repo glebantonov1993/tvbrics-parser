@@ -137,14 +137,16 @@ def parse(url):
 
 
 # =========================
-# MAIN RUN (ONE PASS)
+# MAIN RUN (FIXED BATCH VERSION)
 # =========================
 rows = worksheet.get_all_values()
+
+MAX_LINKS = 10
 
 for i, row in enumerate(rows[1:], start=2):
 
     url = row[1]
-    status = row[6] if len(row) > 6 else ""
+    status = row[25] if len(row) > 25 else ""  # Z column (safe index)
 
     if not url or status == "DONE":
         continue
@@ -153,20 +155,35 @@ for i, row in enumerate(rows[1:], start=2):
 
     date, title, links, partners_found = parse(url)
 
-    worksheet.update_cell(i, 3, date)
-    worksheet.update_cell(i, 4, title)
+    # =========================
+    # 🧠 BUILD FULL ROW (ONE REQUEST)
+    # =========================
+    row_data = []
 
-    MAX_LINKS = 10
+    # A timestamp (если есть — можешь потом добавить)
+    row_data.append("")
+    row_data.append(url)
+    row_data.append(date)
+    row_data.append(title)
 
+    # LINKS + PARTNERS
     for idx in range(MAX_LINKS):
         link = links[idx] if idx < len(links) else ""
         partner = partners_found[idx] if idx < len(partners_found) else ""
 
-        col_link = 5 + idx * 2      # E, G, I...
-        col_partner = 6 + idx * 2   # F, H, J...
+        row_data.append(link)
+        row_data.append(partner)
 
-        worksheet.update_cell(i, col_link, link)
-        worksheet.update_cell(i, col_partner, partner)
+    # padding до Z
+    while len(row_data) < 26:
+        row_data.append("")
 
-    STATUS_COL = 26  # Z
-    worksheet.update_cell(i, STATUS_COL, "DONE")
+    # STATUS
+    row_data.append("DONE")
+
+    # =========================
+    # ⚡ SINGLE WRITE (FIX FOR 429)
+    # =========================
+    worksheet.update(f"A{i}:AA{i}", [row_data])
+
+    print("OK:", i)
