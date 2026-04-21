@@ -168,4 +168,5 @@ for i, row in enumerate(rows[1:], start=2):
         worksheet.update_cell(i, col_link, link)
         worksheet.update_cell(i, col_partner, partner)
 
-    worksheet.update_cell(i, 7, "DONE")
+    STATUS_COL = 26  # Z
+    worksheet.update_cell(i, STATUS_COL, "DONE")
