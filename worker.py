@@ -7,7 +7,7 @@ import json
 from google.oauth2.service_account import Credentials
 
 # =========================
-# GOOGLE AUTH (GitHub Secret)
+# GOOGLE AUTH
 # =========================
 creds_json = json.loads(os.environ["GOOGLE_CREDS"])
 
@@ -24,77 +24,23 @@ creds = Credentials.from_service_account_info(
 gc = gspread.authorize(creds)
 
 # =========================
-# GOOGLE SHEET
+# SHEET
 # =========================
 SHEET_ID = "1Dv0dSEoTHN3ri7CITXjZE7kOw-QU5ri9jLpcG8xApCo"
 sh = gc.open_by_key(SHEET_ID)
 worksheet = sh.sheet1
 
-
 # =========================
-# ПАРТНЁРЫ
+# PARTNERS
 # =========================
 partners = {
     "vision360.bo": "Visión 360",
     "cgtn.com": "CGTN",
     "elbalad.news": "Sada El-Balad",
     "vnanet.vn": "Vietnam News Agency (VNA)",
-    "news.cgtn.com": "CGTN",
-    "antaranews.com": "ANTARA",
-    "en.antaranews.com": "ANTARA",
-    "news.by": "Белтелерадиокомпания",
-    "volga24.tv": "Волга 24",
-    "utrk.kg": "НТРК КР",
-    "nournews.ir": "Nour News",
-    "akchabar.kg": "Акчабар",
-    "tvri.go.id": "TVRI",
-    "thediplomaticsociety.co.za": "The Diplomatic Society",
-    "boliviatv.bo": "BOLIVIA TV",
-    "brasildefato.com.br": "Brasil de Fato",
-    "thaipbs.or.th": "Thai PBS",
-    "grupormultimedio.com": "Diario la R",
-    "elmaipo.cl": "El Maipo",
-    "tabnak.ir": "Tabnak",
-    "bernama.com": "Bernama",
-    "canal6tv.com": "Canal 6 Tv",
-    "nannews.ng": "News Agency of Nigeria",
-    "tv9.com": "TV9",
-    "elbaladtv.net": "Sada El Balad",
     "globaltimes.cn": "Global Times",
-    "herald.co.zw": "The Herald",
-    "mena.org.eg": "MENA",
-    "belta.by": "БелТА",
-    "inform.kz": "МИА Казинформ",
-    "wam.ae": "WAM",
-    "elciudadano.com": "El Ciudadano",
-    "cronicadigital.cl": "Crónica Digital",
-    "irna.ir": "IRNA",
-    "mehrnews.com": "Mehr Media Group",
-    "tap.info.tn": "Tunis Afrique Presse",
-    "dailynewsegypt.com": "Daily News Egypt",
-    "bricslat.com": "BRICSLat",
-    "china.com": "China.com",
-    "atnews.co.za": "African Times",
-    "telesurtv.net": "teleSUR",
-    "dknews.kz": "Деловой Казахстан",
-    "info-rm.com": "Мордовия 24",
-    "dbw.cn": "Дунбэйван",
-    "ahorasanjuan.com": "Ahora San Juan",
-    "prensa-latina.cu": "Prensa Latina",
-    "brasil247.com": "Brasil 247",
-    "zbc.co.zw": "Zimbabwe Broadcasting Corporation",
-    "ians.in": "IANS",
-    "todapalavra.info": "Toda Palavra",
-    "chinadaily.com.cn": "China Daily",
-    "iol.co.za": "Pretoria News",
-    "itmexpo.ru": "Интурмаркет",
-    "durbantv.net": "Durban TV",
-    "trinitymirror.net": "Trinity Mirror",
-    "metropoles.com": "Metropoles",
-    "people.com.cn": "Жэньминь жибао",
     "news.cn": "СИНЬХУА Новости",
-    "tvcultura.com.br": "TV CULTURA",
-    "africannewsagency.com": "ANA"
+    "telesurtv.net": "teleSUR"
 }
 
 
@@ -129,7 +75,6 @@ def parse(url):
             continue
 
         partner = get_partner(link)
-
         if partner != "—":
             links_dict[link] = partner
 
@@ -137,7 +82,7 @@ def parse(url):
 
 
 # =========================
-# MAIN RUN (FIXED BATCH VERSION)
+# MAIN
 # =========================
 rows = worksheet.get_all_values()
 
@@ -146,7 +91,7 @@ MAX_LINKS = 10
 for i, row in enumerate(rows[1:], start=2):
 
     url = row[1]
-    status = row[25] if len(row) > 25 else ""  # Z column (safe index)
+    status = row[25] if len(row) > 25 else ""
 
     if not url or status == "DONE":
         continue
@@ -156,14 +101,20 @@ for i, row in enumerate(rows[1:], start=2):
     date, title, links, partners_found = parse(url)
 
     # =========================
-    # 🧠 BUILD FULL ROW (ONE REQUEST)
+    # BUILD ROW
     # =========================
     row_data = []
 
-    # A timestamp (если есть — можешь потом добавить)
+    # A timestamp (пока пусто)
     row_data.append("")
+
+    # B URL
     row_data.append(url)
+
+    # C date
     row_data.append(date)
+
+    # D title
     row_data.append(title)
 
     # LINKS + PARTNERS
@@ -178,12 +129,12 @@ for i, row in enumerate(rows[1:], start=2):
     while len(row_data) < 26:
         row_data.append("")
 
-    # STATUS
+    # STATUS (Z)
     row_data.append("DONE")
 
     # =========================
-    # ⚡ SINGLE WRITE (FIX FOR 429)
+    # SINGLE WRITE (FIX 429)
     # =========================
     worksheet.update(f"A{i}:AA{i}", [row_data])
 
-    print("OK:", i)
+    print("OK row:", i)
