@@ -10,7 +10,16 @@ from google.oauth2.service_account import Credentials
 # GOOGLE AUTH (GitHub Secret)
 # =========================
 creds_json = json.loads(os.environ["GOOGLE_CREDS"])
-creds = Credentials.from_service_account_info(creds_json)
+
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+creds = Credentials.from_service_account_info(
+    creds_json,
+    scopes=SCOPES
+)
 
 gc = gspread.authorize(creds)
 
