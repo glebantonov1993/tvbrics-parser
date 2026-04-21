@@ -29,55 +29,21 @@ gc = gspread.authorize(creds)
 # SHEET
 # =========================
 SHEET_ID = "1Dv0dSEoTHN3ri7CITXjZE7kOw-QU5ri9jLpcG8xApCo"
-sh = gc.open_by_key(SHEET_ID)
-worksheet = sh.sheet1
+worksheet = gc.open_by_key(SHEET_ID).sheet1
 
 # =========================
 # PARTNERS
 # =========================
 partners = {
-    "vision360.bo": "Visión 360",
     "cgtn.com": "CGTN",
-    "news9live.com": "News9",
-    "alalam.ir": "Alalam News Network",
-    "inform.kz": "Kazinform",
     "aninews.in": "ANI",
-    "elbalad.news": "Sada El-Balad",
-    "vnanet.vn": "Vietnam News Agency (VNA)",
-    "news.cgtn.com": "CGTN",
-    "news.by": "Белтелерадиокомпания",
-    "volga24.tv": "Волга 24",
-    "utrk.kg": "НТРК КР",
-    "nournews.ir": "Nour News",
-    "akchabar.kg": "Акчабар",
-    "tvri.go.id": "TVRI",
-    "boliviatv.bo": "BOLIVIA TV",
-    "brasildefato.com.br": "Brasil de Fato",
-    "thaipbs.or.th": "Thai PBS",
-    "grupormultimedio.com": "Diario la R",
+    "vnanet.vn": "VNA",
     "elmaipo.cl": "El Maipo",
-    "tabnak.ir": "Tabnak",
-    "bernama.com": "Bernama",
-    "canal6tv.com": "Canal 6 Tv",
-    "nannews.ng": "News Agency of Nigeria",
-    "tv9.com": "TV9",
-    "elbaladtv.net": "Sada El Balad",
-    "globaltimes.cn": "Global Times",
-    "herald.co.zw": "The Herald",
-    "mena.org.eg": "MENA",
-    "belta.by": "БелТА",
-    "wam.ae": "WAM",
-    "irna.ir": "IRNA",
-    "mehrnews.com": "Mehr Media Group",
-    "telesurtv.net": "teleSUR",
-    "dknews.kz": "Деловой Казахстан",
-    "info-rm.com": "Мордовия 24",
+    "inform.kz": "Kazinform",
+    "china.com": "China.com",
     "chinadaily.com.cn": "China Daily",
-    "iol.co.za": "Pretoria News",
-    "durbantv.net": "Durban TV",
-    "metropoles.com": "Metropoles",
-    "people.com.cn": "Жэньминь жибао",
-    "news.cn": "СИНЬХУА Новости"
+    "telesurtv.net": "teleSUR",
+    "irna.ir": "IRNA"
 }
 
 # =========================
@@ -99,39 +65,34 @@ def get_language(url):
     return "ru"
 
 # =========================
-# DATE NORMALIZATION (ВАЖНО)
+# DATE EXTRACTION (ВАЖНО)
 # =========================
-def parse_normalized_date(date_str):
-    if not date_str:
-        return ""
+def extract_date_any(soup):
+    text = soup.get_text(" ", strip=True)
 
-    # Китай / араб / японский: 2026年04月21日
-    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", date_str)
+    # 1. CN / JP / AR format
+    m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", text)
     if m:
         y, mo, d = map(int, m.groups())
         return f"{y:04d}-{mo:02d}-{d:02d}"
 
-    # обычный EU формат: 27.03.26
-    try:
-        dt = datetime.strptime(date_str, "%d.%m.%y")
-        return dt.strftime("%Y-%m-%d")
-    except:
-        pass
+    # 2. EU format 27.03.26
+    m = re.search(r"\b(\d{2})\.(\d{2})\.(\d{2})\b", text)
+    if m:
+        return datetime.strptime(m.group(0), "%d.%m.%y").strftime("%Y-%m-%d")
 
-    # ISO fallback
-    try:
-        dt = datetime.fromisoformat(date_str[:10])
-        return dt.strftime("%Y-%m-%d")
-    except:
-        pass
+    # 3. ISO fallback
+    m = re.search(r"\d{4}-\d{2}-\d{2}", text)
+    if m:
+        return m.group(0)
 
     return ""
 
-def parse_month(norm_date):
-    if not norm_date:
+def parse_month(date_str):
+    if not date_str:
         return ""
     try:
-        return int(norm_date.split("-")[1])
+        return int(date_str.split("-")[1])
     except:
         return ""
 
@@ -150,17 +111,23 @@ def get_partner(url):
 # =========================
 def parse(url):
     try:
-        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-    except Exception:
+        r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
+    except:
         return "", "", [], []
 
     soup = BeautifulSoup(r.text, "html.parser")
 
-    date_tag = soup.find("span", class_="data_row__date")
+    # title
+    title_tag = soup.find("h1")
+    title = title_tag.get_text(strip=True) if title_tag else ""
+
+    # date from HTML (если есть)
+    date_tag = soup.find("span")
     date = date_tag.get_text(strip=True) if date_tag else ""
 
-    title_tag = soup.find("h1", class_="news-detail__name")
-    title = title_tag.get_text(strip=True) if title_tag else ""
+    # fallback extraction
+    if not date:
+        date = extract_date_any(soup)
 
     links = []
     partners_list = []
@@ -192,7 +159,7 @@ def parse(url):
 rows = worksheet.get_all_values()
 
 MAX_LINKS = 10
-TOTAL_COLS = 29  # A–AC
+TOTAL_COLS = 29
 
 for i, row in enumerate(rows[1:], start=2):
 
@@ -206,33 +173,25 @@ for i, row in enumerate(rows[1:], start=2):
 
     date, title, links, partners_found = parse(url)
 
-    norm_date = parse_normalized_date(date)
-    month = parse_month(norm_date)
+    month = parse_month(date)
     language = get_language(url)
 
     row_data = [""] * TOTAL_COLS
 
-    # A
+    # base
     row_data[1] = url
-    row_data[2] = norm_date
+    row_data[2] = date
     row_data[3] = title
 
     # links
     for idx in range(MAX_LINKS):
-        link = links[idx] if idx < len(links) else ""
-        partner = partners_found[idx] if idx < len(partners_found) else ""
+        row_data[4 + idx * 2] = links[idx] if idx < len(links) else ""
+        row_data[5 + idx * 2] = partners_found[idx] if idx < len(partners_found) else ""
 
-        row_data[4 + idx * 2] = link
-        row_data[5 + idx * 2] = partner
-
-    # system cols
     row_data[26] = "DONE"
     row_data[27] = language
     row_data[28] = month
 
-    worksheet.update(
-        range_name=f"A{i}:AC{i}",
-        values=[row_data]
-    )
+    worksheet.update(f"A{i}:AC{i}", [row_data])
 
     print("OK:", i)
