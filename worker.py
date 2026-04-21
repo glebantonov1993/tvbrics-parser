@@ -99,28 +99,28 @@ def get_language(url):
     return "ru"
 
 # =========================
-# DATE PARSER (FIXED)
+# DATE NORMALIZATION (ВАЖНО)
 # =========================
 def parse_normalized_date(date_str):
     if not date_str:
         return ""
 
-    # CN / AR format: 2026年04月21日
+    # Китай / араб / японский: 2026年04月21日
     m = re.search(r"(\d{4})年(\d{1,2})月(\d{1,2})日", date_str)
     if m:
         y, mo, d = map(int, m.groups())
         return f"{y:04d}-{mo:02d}-{d:02d}"
 
-    # EU format: 27.03.26
+    # обычный EU формат: 27.03.26
     try:
         dt = datetime.strptime(date_str, "%d.%m.%y")
         return dt.strftime("%Y-%m-%d")
     except:
         pass
 
-    # fallback ISO
+    # ISO fallback
     try:
-        dt = datetime.fromisoformat(date_str)
+        dt = datetime.fromisoformat(date_str[:10])
         return dt.strftime("%Y-%m-%d")
     except:
         pass
@@ -192,7 +192,7 @@ def parse(url):
 rows = worksheet.get_all_values()
 
 MAX_LINKS = 10
-TOTAL_COLS = 29
+TOTAL_COLS = 29  # A–AC
 
 for i, row in enumerate(rows[1:], start=2):
 
@@ -212,10 +212,12 @@ for i, row in enumerate(rows[1:], start=2):
 
     row_data = [""] * TOTAL_COLS
 
+    # A
     row_data[1] = url
     row_data[2] = norm_date
     row_data[3] = title
 
+    # links
     for idx in range(MAX_LINKS):
         link = links[idx] if idx < len(links) else ""
         partner = partners_found[idx] if idx < len(partners_found) else ""
@@ -223,6 +225,7 @@ for i, row in enumerate(rows[1:], start=2):
         row_data[4 + idx * 2] = link
         row_data[5 + idx * 2] = partner
 
+    # system cols
     row_data[26] = "DONE"
     row_data[27] = language
     row_data[28] = month
