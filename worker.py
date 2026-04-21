@@ -199,9 +199,13 @@ def parse(url):
 # =========================
 # MAIN
 # =========================
+# =========================
+# MAIN
+# =========================
 rows = worksheet.get_all_values()
 
 MAX_LINKS = 10
+TOTAL_COLS = 29  # A–AC
 
 for i, row in enumerate(rows[1:], start=2):
 
@@ -218,32 +222,43 @@ for i, row in enumerate(rows[1:], start=2):
     language = get_language(url)
     month = parse_month(date)
 
-    # base columns
-    row_data = []
-    row_data.append("")      # A timestamp (пока пусто)
-    row_data.append(url)     # B
-    row_data.append(date)    # C
-    row_data.append(title)   # D
+    # =========================
+    # 🧠 BUILD ROW (СТРОГО 29 КОЛОНОК)
+    # =========================
+    row_data = [""] * TOTAL_COLS
 
-    # links
+    # базовые
+    row_data[0] = ""          # A timestamp
+    row_data[1] = url         # B
+    row_data[2] = date        # C
+    row_data[3] = title       # D
+
+    # ссылки + партнёры (E–X)
     for idx in range(MAX_LINKS):
-        row_data.append(links[idx] if idx < len(links) else "")
-        row_data.append(partners_found[idx] if idx < len(partners_found) else "")
+        link = links[idx] if idx < len(links) else ""
+        partner = partners_found[idx] if idx < len(partners_found) else ""
 
-    # padding to AA (27 cols)
-    while len(row_data) < 27:
-        row_data.append("")
+        col_link = 4 + idx * 2       # E=4
+        col_partner = 5 + idx * 2    # F=5
 
-    # AA status
-    row_data.append("DONE")
+        row_data[col_link] = link
+        row_data[col_partner] = partner
 
-    # AB language
-    row_data.append(language)
+    # AA статус
+    row_data[26] = "DONE"
 
-    # AC month
-    row_data.append(month)
+    # AB язык
+    row_data[27] = language
 
-    # batch write
-    worksheet.update(f"A{i}:AC{i}", [row_data])
+    # AC месяц
+    row_data[28] = month
+
+    # =========================
+    # ⚡ ОДНА ЗАПИСЬ
+    # =========================
+    worksheet.update(
+        range_name=f"A{i}:AC{i}",
+        values=[row_data]
+    )
 
     print("OK:", i)
