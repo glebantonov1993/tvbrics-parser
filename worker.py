@@ -19,7 +19,11 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = Credentials.from_service_account_info(creds_json, scopes=SCOPES)
+creds = Credentials.from_service_account_info(
+    creds_json,
+    scopes=SCOPES
+)
+
 gc = gspread.authorize(creds)
 
 # =========================
@@ -40,7 +44,6 @@ partners = {
     "aninews.in": "ANI",
     "elbalad.news": "Sada El-Balad",
     "vnanet.vn": "Vietnam News Agency (VNA)",
-    "news.cgtn.com": "CGTN",
     "news.by": "Белтелерадиокомпания",
     "volga24.tv": "Волга 24",
     "utrk.kg": "НТРК КР",
@@ -68,31 +71,13 @@ partners = {
     "cronicadigital.cl": "Crónica Digital",
     "irna.ir": "IRNA",
     "mehrnews.com": "Mehr Media Group",
-    "tap.info.tn": "Tunis Afrique Presse",
-    "dailynewsegypt.com": "Daily News Egypt",
-    "bricslat.com": "BRICSLat",
-    "china.com": "China.com",
-    "atnews.co.za": "African Times",
-    "telesurtv.net": "teleSUR",
-    "dknews.kz": "Деловой Казахстан",
-    "info-rm.com": "Мордовия 24",
-    "dbw.cn": "Дунбэйван",
-    "ahorasanjuan.com": "Ahora San Juan",
+    "chinadaily.com.cn": "China Daily",
+    "news.cn": "СИНЬХУА Новости",
+    "people.com.cn": "Жэньминь жибао",
     "prensa-latina.cu": "Prensa Latina",
     "brasil247.com": "Brasil 247",
-    "zbc.co.zw": "Zimbabwe Broadcasting Corporation",
-    "ians.in": "IANS",
-    "todapalavra.info": "Toda Palavra",
-    "chinadaily.com.cn": "China Daily",
-    "iol.co.za": "Pretoria News",
-    "itmexpo.ru": "Интурмаркет",
-    "durbantv.net": "Durban TV",
-    "trinitymirror.net": "Trinity Mirror",
-    "metropoles.com": "Metropoles",
-    "people.com.cn": "Жэньминь жибао",
-    "news.cn": "СИНЬХУА Новости",
-    "tvcultura.com.br": "TV CULTURA",
-    "africannewsagency.com": "ANA"
+    "telesurtv.net": "teleSUR",
+    "china.com": "China.com"
 }
 
 partners = {k.lower(): v for k, v in partners.items()}
@@ -145,7 +130,7 @@ def fetch(url):
     return None
 
 # =========================
-# PARSE
+# PARSE PAGE
 # =========================
 def parse(url):
     html = fetch(url)
@@ -162,7 +147,7 @@ def parse(url):
     title_tag = soup.find("h1", class_="news-detail__name")
     title = title_tag.get_text(strip=True) if title_tag else ""
 
-    links, partners_list, seen = [], [], set()
+    links, partners_found, seen = [], [], set()
 
     for a in soup.find_all("a", href=True):
         link = urljoin(url, a["href"])
@@ -174,15 +159,16 @@ def parse(url):
             continue
 
         partner = get_partner(link)
+
         if partner:
             seen.add(link)
             links.append(link)
-            partners_list.append(partner)
+            partners_found.append(partner)
 
         if len(links) >= 10:
             break
 
-    return date, title, links, partners_list
+    return date, title, links, partners_found
 
 # =========================
 # PROCESS ROW
@@ -201,18 +187,22 @@ def process_row(row_number: int):
         return
 
     url = row[1]
-    print(f"[INFO] row={row_number} url={url}")
+
+    print(f"[INFO] processing row={row_number} url={url}")
 
     date, title, links, partners_found = parse(url)
 
-    row_data = [""] * 29
+    TOTAL_COLS = 29
+    MAX_LINKS = 10
+
+    row_data = [""] * TOTAL_COLS
 
     row_data[0] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     row_data[1] = url
     row_data[2] = date
     row_data[3] = title
 
-    for i in range(10):
+    for i in range(MAX_LINKS):
         row_data[4 + i * 2] = links[i] if i < len(links) else ""
         row_data[5 + i * 2] = partners_found[i] if i < len(partners_found) else ""
 
@@ -225,15 +215,17 @@ def process_row(row_number: int):
     print(f"[SUCCESS] row {row_number} done")
 
 # =========================
-# ENTRY POINT
+# ENTRY POINT (GITHUB ACTIONS)
 # =========================
 if __name__ == "__main__":
 
     if len(sys.argv) < 2:
         print("[ERROR] row number not provided")
-        exit(1)
+        sys.exit(1)
 
-    process_row(int(sys.argv[1]))
-
-
-process_row(row_number)
+    try:
+        row_number = int(sys.argv[1])
+        process_row(row_number)
+    except Exception as e:
+        print("[FATAL ERROR]", str(e))
+        sys.exit(1)
