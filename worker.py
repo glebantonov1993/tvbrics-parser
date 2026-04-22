@@ -5,6 +5,7 @@ import gspread
 import os
 import json
 import time
+import sys
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 
@@ -18,11 +19,7 @@ SCOPES = [
     "https://www.googleapis.com/auth/drive"
 ]
 
-creds = Credentials.from_service_account_info(
-    creds_json,
-    scopes=SCOPES
-)
-
+creds = Credentials.from_service_account_info(creds_json, scopes=SCOPES)
 gc = gspread.authorize(creds)
 
 # =========================
@@ -98,62 +95,49 @@ partners = {
     "africannewsagency.com": "ANA"
 }
 
-partners = {k.strip().lower(): v.strip() for k, v in partners.items()}
+partners = {k.lower(): v for k, v in partners.items()}
 
 # =========================
-# LANGUAGE
-# =========================
-LANG_MAP = {
-    "tvbrics.com/en/": "en",
-    "tvbrics.com/cn/": "cn",
-    "tvbrics.com/pt/": "pt",
-    "tvbrics.com/es/": "es",
-    "tvbrics.com/ar/": "ar",
-    "tvbrics.com/": "ru",
-}
-
-def get_language(url):
-    for k, v in LANG_MAP.items():
-        if k in url:
-            return v
-    return "ru"
-
-# =========================
-# MONTH
-# =========================
-def parse_month(date_str):
-    if not date_str:
-        return ""
-
-    import re
-
-    m = re.search(r"(\d{2,4})年(\d{1,2})月", date_str)
-    if m:
-        return int(m.group(2))
-
-    try:
-        dt = datetime.strptime(date_str, "%d.%m.%y")
-        return dt.month
-    except:
-        return ""
-
-# =========================
-# PARTNER MATCH
+# HELPERS
 # =========================
 def get_partner(url):
-    domain = urlparse(url).netloc.lower().strip()
+    domain = urlparse(url).netloc.lower()
     for d, name in partners.items():
         if domain.endswith(d):
             return name
     return ""
 
+def get_language(url):
+    if "tvbrics.com/en/" in url:
+        return "en"
+    if "tvbrics.com/cn/" in url:
+        return "cn"
+    if "tvbrics.com/pt/" in url:
+        return "pt"
+    if "tvbrics.com/es/" in url:
+        return "es"
+    if "tvbrics.com/ar/" in url:
+        return "ar"
+    return "ru"
+
+def parse_month(date_str):
+    import re
+    if not date_str:
+        return ""
+
+    m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})", date_str)
+    if m:
+        return int(m.group(2))
+
+    return ""
+
 # =========================
-# FETCH WITH RETRY
+# FETCH
 # =========================
-def fetch(url, retries=3, timeout=10):
-    for _ in range(retries):
+def fetch(url):
+    for _ in range(3):
         try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
             if r.status_code == 200:
                 return r.text
         except:
@@ -161,13 +145,14 @@ def fetch(url, retries=3, timeout=10):
     return None
 
 # =========================
-# PARSE PAGE
+# PARSE
 # =========================
 def parse(url):
     html = fetch(url)
 
     if not html:
-        return "Сайт не работает, попробуйте позже", "", [], []
+        print("[WARN] site not reachable:", url)
+        return "", "", [], []
 
     soup = BeautifulSoup(html, "html.parser")
 
@@ -177,9 +162,7 @@ def parse(url):
     title_tag = soup.find("h1", class_="news-detail__name")
     title = title_tag.get_text(strip=True) if title_tag else ""
 
-    links = []
-    partners_list = []
-    seen = set()
+    links, partners_list, seen = [], [], set()
 
     for a in soup.find_all("a", href=True):
         link = urljoin(url, a["href"])
@@ -191,7 +174,6 @@ def parse(url):
             continue
 
         partner = get_partner(link)
-
         if partner:
             seen.add(link)
             links.append(link)
@@ -203,64 +185,55 @@ def parse(url):
     return date, title, links, partners_list
 
 # =========================
-# MAIN (TRIGGER MODE)
+# PROCESS ROW
 # =========================
-
 def process_row(row_number: int):
 
     row = worksheet.row_values(row_number)
 
-    url = row[1] if len(row) > 1 else ""
-
-    if not url:
-        print("[SKIP] empty url")
+    if len(row) < 2 or not row[1]:
+        print("[SKIP] empty row/url")
         return
 
-    print(f"[INFO] processing row={row_number} url={url}")
+    # защита от повторной обработки
+    if len(row) > 26 and row[26] == "DONE":
+        print("[SKIP] already done")
+        return
+
+    url = row[1]
+    print(f"[INFO] row={row_number} url={url}")
 
     date, title, links, partners_found = parse(url)
 
-    language = get_language(url)
-    month = parse_month(date)
-
-    TOTAL_COLS = 29
-    MAX_LINKS = 10
-
-    row_data = [""] * TOTAL_COLS
+    row_data = [""] * 29
 
     row_data[0] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     row_data[1] = url
     row_data[2] = date
     row_data[3] = title
 
-    for idx in range(MAX_LINKS):
-        row_data[4 + idx * 2] = links[idx] if idx < len(links) else ""
-        row_data[5 + idx * 2] = partners_found[idx] if idx < len(partners_found) else ""
+    for i in range(10):
+        row_data[4 + i * 2] = links[i] if i < len(links) else ""
+        row_data[5 + i * 2] = partners_found[i] if i < len(partners_found) else ""
 
     row_data[26] = "DONE"
-    row_data[27] = language
-    row_data[28] = month
+    row_data[27] = get_language(url)
+    row_data[28] = parse_month(date)
 
     worksheet.update(f"A{row_number}:AC{row_number}", [row_data])
 
-    print(f"[SUCCESS] row {row_number} processed")
+    print(f"[SUCCESS] row {row_number} done")
 
 # =========================
-# ENTRY POINT (FROM TRIGGER)
+# ENTRY POINT
 # =========================
-
 if __name__ == "__main__":
-
-    # 👇 сюда Google Sheets trigger должен передавать row number
-    import sys
 
     if len(sys.argv) < 2:
         print("[ERROR] row number not provided")
         exit(1)
 
-    row_number = int(sys.argv[1])
-
-    process_row(row_number)
+    process_row(int(sys.argv[1]))
 
 
-    print("[INFO] nothing to update")
+process_row(row_number)
