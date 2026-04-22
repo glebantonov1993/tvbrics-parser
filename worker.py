@@ -277,4 +277,3 @@ if updates:
     print("[SUCCESS] done")
 else:
     print("[INFO] nothing to update")
- 
