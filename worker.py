@@ -1,3 +1,5 @@
+
+
 import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse, urljoin
@@ -36,18 +38,20 @@ output_ws = sh.worksheet("CN_VIEW")
 log_ws = sh.worksheet("LOGS")
 
 # =========================
-# LOCK
+# LOCK (FIXED)
 # =========================
 LOCK_CELL = "Z1"
 
 def acquire_lock():
-    if queue_ws.acell(LOCK_CELL).value == "TRUE":
+    value = queue_ws.acell(LOCK_CELL).value
+    if value == "TRUE":
         return False
-    queue_ws.update(LOCK_CELL, "TRUE")
+
+    queue_ws.update(LOCK_CELL, [["TRUE"]])   # 🔥 FIX
     return True
 
 def release_lock():
-    queue_ws.update(LOCK_CELL, "FALSE")
+    queue_ws.update(LOCK_CELL, [["FALSE"]])  # 🔥 FIX
 
 # =========================
 # PARTNERS (O(1))
@@ -116,22 +120,20 @@ partners = {
     "africannewsagency.com": "ANA"
 }
 
-
 # =========================
 # LANGUAGE
 # =========================
-LANG_MAP = {
-    "tvbrics.com/en/": "en",
-    "tvbrics.com/cn/": "cn",
-    "tvbrics.com/pt/": "pt",
-    "tvbrics.com/es/": "es",
-    "tvbrics.com/ar/": "ar",
-}
-
 def get_language(url):
-    for k, v in LANG_MAP.items():
-        if k in url:
-            return v
+    if "tvbrics.com/en/" in url:
+        return "en"
+    if "tvbrics.com/cn/" in url:
+        return "cn"
+    if "tvbrics.com/pt/" in url:
+        return "pt"
+    if "tvbrics.com/es/" in url:
+        return "es"
+    if "tvbrics.com/ar/" in url:
+        return "ar"
     return "ru"
 
 # =========================
@@ -144,13 +146,13 @@ def parse_month(date_str):
         return ""
 
 # =========================
-# PARTNER MATCH O(1)
+# PARTNER MATCH
 # =========================
 def get_partner(url):
     domain = urlparse(url).netloc.lower()
-    for d in PARTNERS:
+    for d, name in PARTNERS.items():
         if domain.endswith(d):
-            return PARTNERS[d]
+            return name
     return ""
 
 # =========================
@@ -165,12 +167,12 @@ def fetch(url):
         )
         if r.status_code == 200:
             return r.text
-    except Exception as e:
+    except:
         return None
     return None
 
 # =========================
-# PARSER
+# PARSE
 # =========================
 def parse(url):
     html = fetch(url)
@@ -187,7 +189,6 @@ def parse(url):
 
     links = []
     partners = []
-
     seen = set()
 
     for a in soup.find_all("a", href=True):
@@ -212,7 +213,7 @@ def parse(url):
     return date, title, links, partners
 
 # =========================
-# LOGGING
+# LOG
 # =========================
 def log(url, status, msg=""):
     log_ws.append_row([
@@ -223,9 +224,9 @@ def log(url, status, msg=""):
     ])
 
 # =========================
-# FETCH TASKS
+# TASKS
 # =========================
-def get_tasks(limit=50):
+def get_tasks(limit=30):
     rows = queue_ws.get_all_values()
     tasks = []
 
@@ -242,14 +243,14 @@ def get_tasks(limit=50):
     return tasks
 
 # =========================
-# UPDATE STATUS
+# STATUS UPDATE
 # =========================
 def set_status(row, status, error=""):
-    queue_ws.update(f"C{row}", status)
-    queue_ws.update(f"D{row}", error)
+    queue_ws.update(f"C{row}", [[status]])  # FIX
+    queue_ws.update(f"D{row}", [[error]])   # FIX
 
 # =========================
-# WRITE OUTPUT
+# OUTPUT
 # =========================
 def write_output(url, date, title, links, partners_list, lang, month):
     row = [
@@ -268,16 +269,15 @@ def write_output(url, date, title, links, partners_list, lang, month):
     output_ws.append_row(row)
 
 # =========================
-# MAIN
+# MAIN RUNNER
 # =========================
 def run():
     if not acquire_lock():
-        print("Locked")
+        print("Already running")
         return
 
     try:
         tasks = get_tasks()
-
         print(f"Tasks: {len(tasks)}")
 
         for row, url in tasks:
@@ -292,7 +292,6 @@ def run():
                 write_output(url, date, title, links, partners_list, lang, month)
 
                 set_status(row, "DONE")
-
                 log(url, "DONE")
 
             except Exception as e:
