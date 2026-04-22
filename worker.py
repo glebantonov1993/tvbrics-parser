@@ -29,11 +29,10 @@ gc = gspread.authorize(creds)
 # SHEET
 # =========================
 SHEET_ID = "1Dv0dSEoTHN3ri7CITXjZE7kOw-QU5ri9jLpcG8xApCo"
-sh = gc.open_by_key(SHEET_ID)
-worksheet = sh.sheet1
+worksheet = gc.open_by_key(SHEET_ID).sheet1
 
 # =========================
-# PARTNERS (СРАЗУ ЧИСТЫЙ)
+# PARTNERS
 # =========================
 partners = {
     "vision360.bo": "Visión 360",
@@ -99,7 +98,6 @@ partners = {
     "africannewsagency.com": "ANA"
 }
 
-# нормализация (на всякий)
 partners = {k.strip().lower(): v.strip() for k, v in partners.items()}
 
 # =========================
@@ -144,31 +142,22 @@ def parse_month(date_str):
 # =========================
 def get_partner(url):
     domain = urlparse(url).netloc.lower().strip()
-
     for d, name in partners.items():
         if domain.endswith(d):
             return name
-
     return ""
 
 # =========================
-# REQUEST WITH RETRY
+# FETCH WITH RETRY
 # =========================
 def fetch(url, retries=3, timeout=10):
-    for attempt in range(retries):
+    for _ in range(retries):
         try:
             r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
-
             if r.status_code == 200:
                 return r.text
-            else:
-                print(f"[WARN] {url} status={r.status_code}")
-
-        except Exception as e:
-            print(f"[ERROR] {url} attempt={attempt+1} error={e}")
-
-        time.sleep(1)
-
+        except:
+            time.sleep(1)
     return None
 
 # =========================
@@ -214,29 +203,28 @@ def parse(url):
     return date, title, links, partners_list
 
 # =========================
-# MAIN
+# MAIN (TRIGGER MODE)
 # =========================
-rows = worksheet.get_all_values()
 
-MAX_LINKS = 10
-TOTAL_COLS = 29
+def process_row(row_number: int):
 
-updates = []
+    row = worksheet.row_values(row_number)
 
-for i, row in enumerate(rows[1:], start=2):
+    url = row[1] if len(row) > 1 else ""
 
-    url = row[1]
-    status = row[26] if len(row) > 26 else ""
+    if not url:
+        print("[SKIP] empty url")
+        return
 
-    if not url or status == "DONE":
-        continue
-
-    print(f"[INFO] parsing row={i} url={url}")
+    print(f"[INFO] processing row={row_number} url={url}")
 
     date, title, links, partners_found = parse(url)
 
     language = get_language(url)
     month = parse_month(date)
+
+    TOTAL_COLS = 29
+    MAX_LINKS = 10
 
     row_data = [""] * TOTAL_COLS
 
@@ -246,34 +234,33 @@ for i, row in enumerate(rows[1:], start=2):
     row_data[3] = title
 
     for idx in range(MAX_LINKS):
-        link = links[idx] if idx < len(links) else ""
-        partner = partners_found[idx] if idx < len(partners_found) else ""
-
-        row_data[4 + idx * 2] = link
-        row_data[5 + idx * 2] = partner
+        row_data[4 + idx * 2] = links[idx] if idx < len(links) else ""
+        row_data[5 + idx * 2] = partners_found[idx] if idx < len(partners_found) else ""
 
     row_data[26] = "DONE"
     row_data[27] = language
     row_data[28] = month
 
-    updates.append((i, row_data))
+    worksheet.update(f"A{row_number}:AC{row_number}", [row_data])
+
+    print(f"[SUCCESS] row {row_number} processed")
 
 # =========================
-# 🔥 BATCH UPDATE
+# ENTRY POINT (FROM TRIGGER)
 # =========================
-if updates:
-    print(f"[INFO] updating {len(updates)} rows")
 
-    ranges = [
-        {
-            "range": f"A{row}:AC{row}",
-            "values": [data]
-        }
-        for row, data in updates
-    ]
+if __name__ == "__main__":
 
-    worksheet.batch_update(ranges)
+    # 👇 сюда Google Sheets trigger должен передавать row number
+    import sys
 
-    print("[SUCCESS] done")
-else:
+    if len(sys.argv) < 2:
+        print("[ERROR] row number not provided")
+        exit(1)
+
+    row_number = int(sys.argv[1])
+
+    process_row(row_number)
+
+
     print("[INFO] nothing to update")
