@@ -5,7 +5,6 @@ import gspread
 import os
 import json
 import time
-import sys
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 
@@ -30,10 +29,11 @@ gc = gspread.authorize(creds)
 # SHEET
 # =========================
 SHEET_ID = "1Dv0dSEoTHN3ri7CITXjZE7kOw-QU5ri9jLpcG8xApCo"
-worksheet = gc.open_by_key(SHEET_ID).sheet1
+sh = gc.open_by_key(SHEET_ID)
+worksheet = sh.sheet1
 
 # =========================
-# PARTNERS
+# PARTNERS (СРАЗУ ЧИСТЫЙ)
 # =========================
 partners = {
     "vision360.bo": "Visión 360",
@@ -44,6 +44,7 @@ partners = {
     "aninews.in": "ANI",
     "elbalad.news": "Sada El-Balad",
     "vnanet.vn": "Vietnam News Agency (VNA)",
+    "news.cgtn.com": "CGTN",
     "news.by": "Белтелерадиокомпания",
     "volga24.tv": "Волга 24",
     "utrk.kg": "НТРК КР",
@@ -71,62 +72,103 @@ partners = {
     "cronicadigital.cl": "Crónica Digital",
     "irna.ir": "IRNA",
     "mehrnews.com": "Mehr Media Group",
-    "chinadaily.com.cn": "China Daily",
-    "news.cn": "СИНЬХУА Новости",
-    "people.com.cn": "Жэньминь жибао",
+    "tap.info.tn": "Tunis Afrique Presse",
+    "dailynewsegypt.com": "Daily News Egypt",
+    "bricslat.com": "BRICSLat",
+    "china.com": "China.com",
+    "atnews.co.za": "African Times",
+    "telesurtv.net": "teleSUR",
+    "dknews.kz": "Деловой Казахстан",
+    "info-rm.com": "Мордовия 24",
+    "dbw.cn": "Дунбэйван",
+    "ahorasanjuan.com": "Ahora San Juan",
     "prensa-latina.cu": "Prensa Latina",
     "brasil247.com": "Brasil 247",
-    "telesurtv.net": "teleSUR",
-    "china.com": "China.com"
+    "zbc.co.zw": "Zimbabwe Broadcasting Corporation",
+    "ians.in": "IANS",
+    "todapalavra.info": "Toda Palavra",
+    "chinadaily.com.cn": "China Daily",
+    "iol.co.za": "Pretoria News",
+    "itmexpo.ru": "Интурмаркет",
+    "durbantv.net": "Durban TV",
+    "trinitymirror.net": "Trinity Mirror",
+    "metropoles.com": "Metropoles",
+    "people.com.cn": "Жэньминь жибао",
+    "news.cn": "СИНЬХУА Новости",
+    "tvcultura.com.br": "TV CULTURA",
+    "africannewsagency.com": "ANA"
 }
 
-partners = {k.lower(): v for k, v in partners.items()}
+# нормализация (на всякий)
+partners = {k.strip().lower(): v.strip() for k, v in partners.items()}
 
 # =========================
-# HELPERS
+# LANGUAGE
 # =========================
-def get_partner(url):
-    domain = urlparse(url).netloc.lower()
-    for d, name in partners.items():
-        if domain.endswith(d):
-            return name
-    return ""
+LANG_MAP = {
+    "tvbrics.com/en/": "en",
+    "tvbrics.com/cn/": "cn",
+    "tvbrics.com/pt/": "pt",
+    "tvbrics.com/es/": "es",
+    "tvbrics.com/ar/": "ar",
+    "tvbrics.com/": "ru",
+}
 
 def get_language(url):
-    if "tvbrics.com/en/" in url:
-        return "en"
-    if "tvbrics.com/cn/" in url:
-        return "cn"
-    if "tvbrics.com/pt/" in url:
-        return "pt"
-    if "tvbrics.com/es/" in url:
-        return "es"
-    if "tvbrics.com/ar/" in url:
-        return "ar"
+    for k, v in LANG_MAP.items():
+        if k in url:
+            return v
     return "ru"
 
+# =========================
+# MONTH
+# =========================
 def parse_month(date_str):
-    import re
     if not date_str:
         return ""
 
-    m = re.search(r"(\d{1,2})\.(\d{1,2})\.(\d{2,4})", date_str)
+    import re
+
+    m = re.search(r"(\d{2,4})年(\d{1,2})月", date_str)
     if m:
         return int(m.group(2))
+
+    try:
+        dt = datetime.strptime(date_str, "%d.%m.%y")
+        return dt.month
+    except:
+        return ""
+
+# =========================
+# PARTNER MATCH
+# =========================
+def get_partner(url):
+    domain = urlparse(url).netloc.lower().strip()
+
+    for d, name in partners.items():
+        if domain.endswith(d):
+            return name
 
     return ""
 
 # =========================
-# FETCH
+# REQUEST WITH RETRY
 # =========================
-def fetch(url):
-    for _ in range(3):
+def fetch(url, retries=3, timeout=10):
+    for attempt in range(retries):
         try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
+
             if r.status_code == 200:
                 return r.text
-        except:
-            time.sleep(1)
+            else:
+                print(f"[WARN] {url} status={r.status_code}")
+
+        except Exception as e:
+            print(f"[ERROR] {url} attempt={attempt+1} error={e}")
+
+        time.sleep(1)
+
     return None
 
 # =========================
@@ -136,8 +178,7 @@ def parse(url):
     html = fetch(url)
 
     if not html:
-        print("[WARN] site not reachable:", url)
-        return "", "", [], []
+        return "Сайт не работает, попробуйте позже", "", [], []
 
     soup = BeautifulSoup(html, "html.parser")
 
@@ -147,7 +188,9 @@ def parse(url):
     title_tag = soup.find("h1", class_="news-detail__name")
     title = title_tag.get_text(strip=True) if title_tag else ""
 
-    links, partners_found, seen = [], [], set()
+    links = []
+    partners_list = []
+    seen = set()
 
     for a in soup.find_all("a", href=True):
         link = urljoin(url, a["href"])
@@ -163,37 +206,37 @@ def parse(url):
         if partner:
             seen.add(link)
             links.append(link)
-            partners_found.append(partner)
+            partners_list.append(partner)
 
         if len(links) >= 10:
             break
 
-    return date, title, links, partners_found
+    return date, title, links, partners_list
 
 # =========================
-# PROCESS ROW
+# MAIN
 # =========================
-def process_row(row_number: int):
+rows = worksheet.get_all_values()
 
-    row = worksheet.row_values(row_number)
+MAX_LINKS = 10
+TOTAL_COLS = 29
 
-    if len(row) < 2 or not row[1]:
-        print("[SKIP] empty row/url")
-        return
+updates = []
 
-    # защита от повторной обработки
-    if len(row) > 26 and row[26] == "DONE":
-        print("[SKIP] already done")
-        return
+for i, row in enumerate(rows[1:], start=2):
 
     url = row[1]
+    status = row[26] if len(row) > 26 else ""
 
-    print(f"[INFO] processing row={row_number} url={url}")
+    if not url or status == "DONE":
+        continue
+
+    print(f"[INFO] parsing row={i} url={url}")
 
     date, title, links, partners_found = parse(url)
 
-    TOTAL_COLS = 29
-    MAX_LINKS = 10
+    language = get_language(url)
+    month = parse_month(date)
 
     row_data = [""] * TOTAL_COLS
 
@@ -202,30 +245,35 @@ def process_row(row_number: int):
     row_data[2] = date
     row_data[3] = title
 
-    for i in range(MAX_LINKS):
-        row_data[4 + i * 2] = links[i] if i < len(links) else ""
-        row_data[5 + i * 2] = partners_found[i] if i < len(partners_found) else ""
+    for idx in range(MAX_LINKS):
+        link = links[idx] if idx < len(links) else ""
+        partner = partners_found[idx] if idx < len(partners_found) else ""
+
+        row_data[4 + idx * 2] = link
+        row_data[5 + idx * 2] = partner
 
     row_data[26] = "DONE"
-    row_data[27] = get_language(url)
-    row_data[28] = parse_month(date)
+    row_data[27] = language
+    row_data[28] = month
 
-    worksheet.update(f"A{row_number}:AC{row_number}", [row_data])
-
-    print(f"[SUCCESS] row {row_number} done")
+    updates.append((i, row_data))
 
 # =========================
-# ENTRY POINT (GITHUB ACTIONS)
+# 🔥 BATCH UPDATE
 # =========================
-if __name__ == "__main__":
+if updates:
+    print(f"[INFO] updating {len(updates)} rows")
 
-    if len(sys.argv) < 2:
-        print("[ERROR] row number not provided")
-        sys.exit(1)
+    ranges = [
+        {
+            "range": f"A{row}:AC{row}",
+            "values": [data]
+        }
+        for row, data in updates
+    ]
 
-    try:
-        row_number = int(sys.argv[1])
-        process_row(row_number)
-    except Exception as e:
-        print("[FATAL ERROR]", str(e))
-        sys.exit(1)
+    worksheet.batch_update(ranges)
+
+    print("[SUCCESS] done")
+else:
+    print("[INFO] nothing to update")
