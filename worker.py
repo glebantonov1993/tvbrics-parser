@@ -5,6 +5,7 @@ import gspread
 import os
 import json
 import time
+import re
 from datetime import datetime
 from google.oauth2.service_account import Credentials
 
@@ -33,7 +34,38 @@ sh = gc.open_by_key(SHEET_ID)
 worksheet = sh.sheet1
 
 # =========================
-# PARTNERS (СРАЗУ ЧИСТЫЙ)
+# DATE NORMALIZER (КИТ + ЕС + fallback)
+# =========================
+def normalize_date(date_str):
+    if not date_str:
+        return ""
+
+    # Китайский формат: 26年04月22日 / 2026年04月22日
+    m = re.search(r"(\d{2,4})年(\d{1,2})月(\d{1,2})日", date_str)
+    if m:
+        year = int(m.group(1))
+        month = int(m.group(2))
+        day = int(m.group(3))
+
+        if year < 100:
+            year += 2000
+
+        try:
+            dt = datetime(year, month, day)
+            return dt.strftime("%d.%m.%y")
+        except:
+            return date_str
+
+    # обычный формат
+    try:
+        dt = datetime.strptime(date_str, "%d.%m.%y")
+        return dt.strftime("%d.%m.%y")
+    except:
+        return date_str
+
+
+# =========================
+# PARTNERS
 # =========================
 partners = {
     "vision360.bo": "Visión 360",
@@ -99,7 +131,6 @@ partners = {
     "africannewsagency.com": "ANA"
 }
 
-# нормализация (на всякий)
 partners = {k.strip().lower(): v.strip() for k, v in partners.items()}
 
 # =========================
@@ -127,8 +158,6 @@ def parse_month(date_str):
     if not date_str:
         return ""
 
-    import re
-
     m = re.search(r"(\d{2,4})年(\d{1,2})月", date_str)
     if m:
         return int(m.group(2))
@@ -152,7 +181,7 @@ def get_partner(url):
     return ""
 
 # =========================
-# REQUEST WITH RETRY
+# REQUEST
 # =========================
 def fetch(url, retries=3, timeout=10):
     for attempt in range(retries):
@@ -161,8 +190,8 @@ def fetch(url, retries=3, timeout=10):
 
             if r.status_code == 200:
                 return r.text
-            else:
-                print(f"[WARN] {url} status={r.status_code}")
+
+            print(f"[WARN] {url} status={r.status_code}")
 
         except Exception as e:
             print(f"[ERROR] {url} attempt={attempt+1} error={e}")
@@ -172,7 +201,7 @@ def fetch(url, retries=3, timeout=10):
     return None
 
 # =========================
-# PARSE PAGE
+# PARSE
 # =========================
 def parse(url):
     html = fetch(url)
@@ -183,7 +212,8 @@ def parse(url):
     soup = BeautifulSoup(html, "html.parser")
 
     date_tag = soup.find("span", class_="data_row__date")
-    date = date_tag.get_text(strip=True) if date_tag else ""
+    raw_date = date_tag.get_text(strip=True) if date_tag else ""
+    date = normalize_date(raw_date)
 
     title_tag = soup.find("h1", class_="news-detail__name")
     title = title_tag.get_text(strip=True) if title_tag else ""
@@ -259,7 +289,7 @@ for i, row in enumerate(rows[1:], start=2):
     updates.append((i, row_data))
 
 # =========================
-# 🔥 BATCH UPDATE
+# UPDATE
 # =========================
 if updates:
     print(f"[INFO] updating {len(updates)} rows")
