@@ -31,7 +31,7 @@ gc = gspread.authorize(creds)
 SHEET_ID = "1Dv0dSEoTHN3ri7CITXjZE7kOw-QU5ri9jLpcG8xApCo"
 sh = gc.open_by_key(SHEET_ID)
 
-queue_ws = sh.worksheet("INPUT_QUEUE")
+queue_ws = sh.worksheet("RAW_DATA")
 output_ws = sh.worksheet("OUTPUT")
 log_ws = sh.worksheet("LOGS")
 
