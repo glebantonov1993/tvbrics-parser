@@ -231,10 +231,12 @@ def get_tasks(limit=30):
     tasks = []
 
     for i, row in enumerate(rows[1:], start=2):
-        url = row[1] if len(row) > 1 else ""
-        status = row[2] if len(row) > 2 else "NEW"
 
-        if status == "NEW":
+        url = row[1] if len(row) > 1 else ""
+        status = row[2] if len(row) > 2 else ""
+
+        # 🔥 FIX: пустой статус = NEW
+        if url and status.strip() in ["", "NEW"]:
             tasks.append((i, url))
 
         if len(tasks) >= limit:
