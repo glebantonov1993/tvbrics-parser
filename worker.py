@@ -181,14 +181,14 @@ def parse(url):
 
     soup = BeautifulSoup(html, "html.parser")
 
-    title = soup.find("h1")
-    title = title.get_text(strip=True) if title else ""
+    date_tag = soup.find("span", class_="data_row__date")
+    date = date_tag.get_text(strip=True) if date_tag else ""
 
-    date = soup.find("span")
-    date = date.get_text(strip=True) if date else ""
+    title_tag = soup.find("h1", class_="news-detail__name")
+    title = title_tag.get_text(strip=True) if title_tag else ""
 
     links = []
-    partners = []
+    partners_list = []
     seen = set()
 
     for a in soup.find_all("a", href=True):
@@ -205,12 +205,12 @@ def parse(url):
         if partner:
             seen.add(link)
             links.append(link)
-            partners.append(partner)
+            partners_list.append(partner)
 
         if len(links) >= 10:
             break
 
-    return date, title, links, partners
+    return date, title, links, partners_list
 
 # =========================
 # LOG
