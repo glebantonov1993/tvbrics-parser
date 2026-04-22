@@ -33,15 +33,15 @@ sh = gc.open_by_key(SHEET_ID)
 worksheet = sh.sheet1
 
 # =========================
-# PARTNERS (НОРМАЛИЗАЦИЯ)
+# PARTNERS (СРАЗУ ЧИСТЫЙ)
 # =========================
 partners = {
     "vision360.bo": "Visión 360",
     "cgtn.com": "CGTN",
     "news9live.com": "News9",
     "alalam.ir": "Alalam News Network",
-    "inform.kz": "Kazinform ",
-    "aninews.in": "ANI ",
+    "inform.kz": "МИА Казинформ",
+    "aninews.in": "ANI",
     "elbalad.news": "Sada El-Balad",
     "vnanet.vn": "Vietnam News Agency (VNA)",
     "news.cgtn.com": "CGTN",
@@ -67,7 +67,6 @@ partners = {
     "herald.co.zw": "The Herald",
     "mena.org.eg": "MENA",
     "belta.by": "БелТА",
-    "inform.kz": "МИА Казинформ",
     "wam.ae": "WAM",
     "elciudadano.com": "El Ciudadano",
     "cronicadigital.cl": "Crónica Digital",
@@ -100,12 +99,8 @@ partners = {
     "africannewsagency.com": "ANA"
 }
 
-
-# чистим словарь
-partners = {
-    k.strip().lower(): v.strip()
-    for k, v in partners_raw.items()
-}
+# нормализация (на всякий)
+partners = {k.strip().lower(): v.strip() for k, v in partners.items()}
 
 # =========================
 # LANGUAGE
