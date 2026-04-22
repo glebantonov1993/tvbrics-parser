@@ -26,14 +26,31 @@ creds = Credentials.from_service_account_info(
 gc = gspread.authorize(creds)
 
 # =========================
-# SHEET
+# SHEETS
 # =========================
 SHEET_ID = "1Dv0dSEoTHN3ri7CITXjZE7kOw-QU5ri9jLpcG8xApCo"
 sh = gc.open_by_key(SHEET_ID)
-worksheet = sh.sheet1
+
+queue_ws = sh.worksheet("INPUT_QUEUE")
+output_ws = sh.worksheet("OUTPUT")
+log_ws = sh.worksheet("LOGS")
 
 # =========================
-# PARTNERS (СРАЗУ ЧИСТЫЙ)
+# LOCK
+# =========================
+LOCK_CELL = "Z1"
+
+def acquire_lock():
+    if queue_ws.acell(LOCK_CELL).value == "TRUE":
+        return False
+    queue_ws.update(LOCK_CELL, "TRUE")
+    return True
+
+def release_lock():
+    queue_ws.update(LOCK_CELL, "FALSE")
+
+# =========================
+# PARTNERS (O(1))
 # =========================
 partners = {
     "vision360.bo": "Visión 360",
@@ -99,8 +116,6 @@ partners = {
     "africannewsagency.com": "ANA"
 }
 
-# нормализация (на всякий)
-partners = {k.strip().lower(): v.strip() for k, v in partners.items()}
 
 # =========================
 # LANGUAGE
@@ -111,7 +126,6 @@ LANG_MAP = {
     "tvbrics.com/pt/": "pt",
     "tvbrics.com/es/": "es",
     "tvbrics.com/ar/": "ar",
-    "tvbrics.com/": "ru",
 }
 
 def get_language(url):
@@ -124,72 +138,56 @@ def get_language(url):
 # MONTH
 # =========================
 def parse_month(date_str):
-    if not date_str:
-        return ""
-
-    import re
-
-    m = re.search(r"(\d{2,4})年(\d{1,2})月", date_str)
-    if m:
-        return int(m.group(2))
-
     try:
-        dt = datetime.strptime(date_str, "%d.%m.%y")
-        return dt.month
+        return datetime.strptime(date_str, "%d.%m.%Y").month
     except:
         return ""
 
 # =========================
-# PARTNER MATCH
+# PARTNER MATCH O(1)
 # =========================
 def get_partner(url):
-    domain = urlparse(url).netloc.lower().strip()
-
-    for d, name in partners.items():
+    domain = urlparse(url).netloc.lower()
+    for d in PARTNERS:
         if domain.endswith(d):
-            return name
-
+            return PARTNERS[d]
     return ""
 
 # =========================
-# REQUEST WITH RETRY
+# FETCH
 # =========================
-def fetch(url, retries=3, timeout=10):
-    for attempt in range(retries):
-        try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
-
-            if r.status_code == 200:
-                return r.text
-            else:
-                print(f"[WARN] {url} status={r.status_code}")
-
-        except Exception as e:
-            print(f"[ERROR] {url} attempt={attempt+1} error={e}")
-
-        time.sleep(1)
-
+def fetch(url):
+    try:
+        r = requests.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0"},
+            timeout=10
+        )
+        if r.status_code == 200:
+            return r.text
+    except Exception as e:
+        return None
     return None
 
 # =========================
-# PARSE PAGE
+# PARSER
 # =========================
 def parse(url):
     html = fetch(url)
-
     if not html:
-        return "Сайт не работает, попробуйте позже", "", [], []
+        raise Exception("Fetch failed")
 
     soup = BeautifulSoup(html, "html.parser")
 
-    date_tag = soup.find("span", class_="data_row__date")
-    date = date_tag.get_text(strip=True) if date_tag else ""
+    title = soup.find("h1")
+    title = title.get_text(strip=True) if title else ""
 
-    title_tag = soup.find("h1", class_="news-detail__name")
-    title = title_tag.get_text(strip=True) if title_tag else ""
+    date = soup.find("span")
+    date = date.get_text(strip=True) if date else ""
 
     links = []
-    partners_list = []
+    partners = []
+
     seen = set()
 
     for a in soup.find_all("a", href=True):
@@ -206,74 +204,108 @@ def parse(url):
         if partner:
             seen.add(link)
             links.append(link)
-            partners_list.append(partner)
+            partners.append(partner)
 
         if len(links) >= 10:
             break
 
-    return date, title, links, partners_list
+    return date, title, links, partners
+
+# =========================
+# LOGGING
+# =========================
+def log(url, status, msg=""):
+    log_ws.append_row([
+        datetime.now().isoformat(),
+        url,
+        status,
+        msg
+    ])
+
+# =========================
+# FETCH TASKS
+# =========================
+def get_tasks(limit=50):
+    rows = queue_ws.get_all_values()
+    tasks = []
+
+    for i, row in enumerate(rows[1:], start=2):
+        url = row[1] if len(row) > 1 else ""
+        status = row[2] if len(row) > 2 else "NEW"
+
+        if status == "NEW":
+            tasks.append((i, url))
+
+        if len(tasks) >= limit:
+            break
+
+    return tasks
+
+# =========================
+# UPDATE STATUS
+# =========================
+def set_status(row, status, error=""):
+    queue_ws.update(f"C{row}", status)
+    queue_ws.update(f"D{row}", error)
+
+# =========================
+# WRITE OUTPUT
+# =========================
+def write_output(url, date, title, links, partners_list, lang, month):
+    row = [
+        url,
+        date,
+        title
+    ]
+
+    for i in range(10):
+        row.append(links[i] if i < len(links) else "")
+        row.append(partners_list[i] if i < len(partners_list) else "")
+
+    row.append(lang)
+    row.append(month)
+
+    output_ws.append_row(row)
 
 # =========================
 # MAIN
 # =========================
-rows = worksheet.get_all_values()
+def run():
+    if not acquire_lock():
+        print("Locked")
+        return
 
-MAX_LINKS = 10
-TOTAL_COLS = 29
+    try:
+        tasks = get_tasks()
 
-updates = []
+        print(f"Tasks: {len(tasks)}")
 
-for i, row in enumerate(rows[1:], start=2):
+        for row, url in tasks:
+            try:
+                set_status(row, "PROCESSING")
 
-    url = row[1]
-    status = row[26] if len(row) > 26 else ""
+                date, title, links, partners_list = parse(url)
 
-    if not url or status == "DONE":
-        continue
+                lang = get_language(url)
+                month = parse_month(date)
 
-    print(f"[INFO] parsing row={i} url={url}")
+                write_output(url, date, title, links, partners_list, lang, month)
 
-    date, title, links, partners_found = parse(url)
+                set_status(row, "DONE")
 
-    language = get_language(url)
-    month = parse_month(date)
+                log(url, "DONE")
 
-    row_data = [""] * TOTAL_COLS
+            except Exception as e:
+                set_status(row, "FAILED", str(e))
+                log(url, "FAILED", str(e))
 
-    row_data[0] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    row_data[1] = url
-    row_data[2] = date
-    row_data[3] = title
+                time.sleep(2)
 
-    for idx in range(MAX_LINKS):
-        link = links[idx] if idx < len(links) else ""
-        partner = partners_found[idx] if idx < len(partners_found) else ""
-
-        row_data[4 + idx * 2] = link
-        row_data[5 + idx * 2] = partner
-
-    row_data[26] = "DONE"
-    row_data[27] = language
-    row_data[28] = month
-
-    updates.append((i, row_data))
+    finally:
+        release_lock()
 
 # =========================
-# 🔥 BATCH UPDATE
+# ENTRY
 # =========================
-if updates:
-    print(f"[INFO] updating {len(updates)} rows")
-
-    ranges = [
-        {
-            "range": f"A{row}:AC{row}",
-            "values": [data]
-        }
-        for row, data in updates
-    ]
-
-    worksheet.batch_update(ranges)
-
-    print("[SUCCESS] done")
-else:
-    print("[INFO] nothing to update")
+if __name__ == "__main__":
+    run()
