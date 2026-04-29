@@ -69,6 +69,7 @@ def normalize_date(date_str):
 # =========================
 partners = {
     "vision360.bo": "Visión 360",
+    "fanamc.com": "Fana Media Corporation",
     "cgtn.com": "CGTN",
     "news9live.com": "News9",
     "alalam.ir": "Alalam News Network",
