@@ -246,17 +246,25 @@ def parse(url):
 # =========================
 # MAIN
 # =========================
+# =========================
+# MAIN
+# =========================
 rows = worksheet.get_all_values()
 
 MAX_LINKS = 10
-TOTAL_COLS = 29
 
 updates = []
 
 for i, row in enumerate(rows[1:], start=2):
 
-    url = row[1]
+    uuid = row[0] if len(row) > 0 else ""
+    url = row[1] if len(row) > 1 else ""
     status = row[26] if len(row) > 26 else ""
+
+    # защита
+    if not uuid:
+        print(f"[WARN] row={i} no UUID → skip")
+        continue
 
     if not url or status == "DONE":
         continue
@@ -268,25 +276,31 @@ for i, row in enumerate(rows[1:], start=2):
     language = get_language(url)
     month = parse_month(date)
 
-    row_data = [""] * TOTAL_COLS
+    # 👇 ВАЖНО: массив БЕЗ колонки A
+    # B..AC = 28 колонок
+    row_data = [""] * 28
 
-    row_data[0] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    row_data[1] = url
-    row_data[2] = date
-    row_data[3] = title
+    # B, C, D
+    row_data[0] = url
+    row_data[1] = date
+    row_data[2] = title
 
+    # ссылки
     for idx in range(MAX_LINKS):
         link = links[idx] if idx < len(links) else ""
         partner = partners_found[idx] if idx < len(partners_found) else ""
 
-        row_data[4 + idx * 2] = link
-        row_data[5 + idx * 2] = partner
+        row_data[3 + idx * 2] = link
+        row_data[4 + idx * 2] = partner
 
-    row_data[26] = "DONE"
-    row_data[27] = language
-    row_data[28] = month
+    # статус + язык + месяц
+    row_data[25] = "DONE"     # AB
+    row_data[26] = language   # AC
+    row_data[27] = month      # AD
 
     updates.append((i, row_data))
+
+
 
 # =========================
 # UPDATE
@@ -296,7 +310,7 @@ if updates:
 
     ranges = [
         {
-            "range": f"A{row}:AC{row}",
+            "range": f"B{row}:AC{row}",  # 🔥 КРИТИЧНО: начинаем с B
             "values": [data]
         }
         for row, data in updates
@@ -305,5 +319,7 @@ if updates:
     worksheet.batch_update(ranges)
 
     print("[SUCCESS] done")
+
 else:
     print("[INFO] nothing to update")
+
