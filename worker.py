@@ -34,35 +34,30 @@ sh = gc.open_by_key(SHEET_ID)
 worksheet = sh.sheet1
 
 # =========================
-# DATE NORMALIZER (КИТ + ЕС + fallback)
+# DATE NORMALIZER
 # =========================
 def normalize_date(date_str):
     if not date_str:
         return ""
 
-    # Китайский формат: 26年04月22日 / 2026年04月22日
     m = re.search(r"(\d{2,4})年(\d{1,2})月(\d{1,2})日", date_str)
     if m:
         year = int(m.group(1))
         month = int(m.group(2))
         day = int(m.group(3))
-
         if year < 100:
             year += 2000
-
         try:
             dt = datetime(year, month, day)
             return dt.strftime("%d.%m.%y")
         except:
             return date_str
 
-    # обычный формат
     try:
         dt = datetime.strptime(date_str, "%d.%m.%y")
         return dt.strftime("%d.%m.%y")
     except:
         return date_str
-
 
 # =========================
 # PARTNERS
@@ -132,7 +127,8 @@ partners = {
     "africannewsagency.com": "ANA"
 }
 
-partners = {k.strip().lower(): v.strip() for k, v in partners.items()}
+
+partners = {k.lower(): v for k, v in partners.items()}
 
 # =========================
 # LANGUAGE
@@ -156,13 +152,6 @@ def get_language(url):
 # MONTH
 # =========================
 def parse_month(date_str):
-    if not date_str:
-        return ""
-
-    m = re.search(r"(\d{2,4})年(\d{1,2})月", date_str)
-    if m:
-        return int(m.group(2))
-
     try:
         dt = datetime.strptime(date_str, "%d.%m.%y")
         return dt.month
@@ -173,52 +162,63 @@ def parse_month(date_str):
 # PARTNER MATCH
 # =========================
 def get_partner(url):
-    domain = urlparse(url).netloc.lower().strip()
-
+    domain = urlparse(url).netloc.lower()
     for d, name in partners.items():
         if domain.endswith(d):
             return name
-
     return ""
 
 # =========================
 # REQUEST
 # =========================
-def fetch(url, retries=3, timeout=10):
-    for attempt in range(retries):
+def fetch(url, retries=3):
+    for _ in range(retries):
         try:
-            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=timeout)
-
+            r = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
             if r.status_code == 200:
                 return r.text
-
-            print(f"[WARN] {url} status={r.status_code}")
-
-        except Exception as e:
-            print(f"[ERROR] {url} attempt={attempt+1} error={e}")
-
+        except:
+            pass
         time.sleep(1)
-
     return None
 
 # =========================
-# PARSE
+# PARSE (🔥 ГЛАВНОЕ ИСПРАВЛЕНИЕ)
 # =========================
 def parse(url):
     html = fetch(url)
 
     if not html:
-        return "Сайт не работает, попробуйте позже", "", [], []
+        return "", "", [], []
 
     soup = BeautifulSoup(html, "html.parser")
 
-    date_tag = soup.find("span", class_="data_row__date")
-    raw_date = date_tag.get_text(strip=True) if date_tag else ""
+    # 🔥 НОВАЯ ЛОГИКА
+    meta = soup.find("meta", property="og:title")
+
+    raw_title = ""
+    raw_date = ""
+
+    if meta and meta.get("content"):
+        content = meta["content"]
+
+        # "Заголовок | TV BRICS, 03.05.26"
+        parts = content.split("|")
+
+        if len(parts) >= 2:
+            raw_title = parts[0].strip()
+
+            right = parts[1]
+            date_match = re.search(r"\d{2}\.\d{2}\.\d{2}", right)
+            if date_match:
+                raw_date = date_match.group(0)
+
+    title = raw_title
     date = normalize_date(raw_date)
 
-    title_tag = soup.find("h1", class_="news-detail__name")
-    title = title_tag.get_text(strip=True) if title_tag else ""
-
+    # =========================
+    # LINKS
+    # =========================
     links = []
     partners_list = []
     seen = set()
@@ -247,13 +247,9 @@ def parse(url):
 # =========================
 # MAIN
 # =========================
-# =========================
-# MAIN
-# =========================
 rows = worksheet.get_all_values()
 
 MAX_LINKS = 10
-
 updates = []
 
 for i, row in enumerate(rows[1:], start=2):
@@ -262,31 +258,22 @@ for i, row in enumerate(rows[1:], start=2):
     url = row[1] if len(row) > 1 else ""
     status = row[26] if len(row) > 26 else ""
 
-    # защита
-    if not uuid:
-        print(f"[WARN] row={i} no UUID → skip")
+    if not uuid or not url or status == "DONE":
         continue
 
-    if not url or status == "DONE":
-        continue
-
-    print(f"[INFO] parsing row={i} url={url}")
+    print(f"[INFO] parsing row={i}")
 
     date, title, links, partners_found = parse(url)
 
     language = get_language(url)
     month = parse_month(date)
 
-    # 👇 ВАЖНО: массив БЕЗ колонки A
-    # B..AC = 28 колонок
     row_data = [""] * 28
 
-    # B, C, D
     row_data[0] = url
     row_data[1] = date
     row_data[2] = title
 
-    # ссылки
     for idx in range(MAX_LINKS):
         link = links[idx] if idx < len(links) else ""
         partner = partners_found[idx] if idx < len(partners_found) else ""
@@ -294,14 +281,11 @@ for i, row in enumerate(rows[1:], start=2):
         row_data[3 + idx * 2] = link
         row_data[4 + idx * 2] = partner
 
-    # статус + язык + месяц
-    row_data[25] = "DONE"     # AB
-    row_data[26] = language   # AC
-    row_data[27] = month      # AD
+    row_data[25] = "DONE"
+    row_data[26] = language
+    row_data[27] = month
 
     updates.append((i, row_data))
-
-
 
 # =========================
 # UPDATE
@@ -311,7 +295,7 @@ if updates:
 
     ranges = [
         {
-            "range": f"B{row}:AC{row}",  # 🔥 КРИТИЧНО: начинаем с B
+            "range": f"B{row}:AC{row}",
             "values": [data]
         }
         for row, data in updates
@@ -319,8 +303,6 @@ if updates:
 
     worksheet.batch_update(ranges)
 
-    print("[SUCCESS] done")
-
+    print("[SUCCESS]")
 else:
     print("[INFO] nothing to update")
-
